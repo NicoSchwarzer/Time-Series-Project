@@ -1,0 +1,224 @@
+
+
+#######################################
+## Preparing for Neural Net analysis ##
+######################################
+
+## splitting the data
+
+# 2/3 in train data
+day_x = 2/3*(ma-mi) + mi
+
+train_df = df1[(df1.index < day_x)]
+test_df = df1[(df1.index >= day_x)]
+
+train_df_y = train_df['Sales_quantity']
+train_df_x = train_df.drop('Sales_quantity', axis = 1)
+
+test_df_y = test_df['Sales_quantity']
+test_df_x = test_df.drop('Sales_quantity', axis = 1)
+
+
+##########################
+### Reshaping the data ###
+##########################
+
+## Checking if dimensions are correct 
+## and reshaping accordingly 
+
+## train_df
+
+train_df_y.ndim  #1 - true
+train_df_y.shape
+
+train_df_x.ndim # 2 - true 
+train_df_x.shape
+
+## test_df
+
+test_df_y.ndim  #1 - true
+test_df_y.shape
+
+test_df_x.ndim # 2 - true 
+test_df_x.shape
+
+#df1.shape
+#24 + 36
+
+## turning the data into time-series style ##
+
+## essentail for feeding into the sequential neural nets ##
+
+def create_time_series(data, w, l, dropnan=True):
+    cols, names = list(), list()
+    for i in range(w, 0, -1):
+        cols.append(data.shift(i))
+        names += [('%s(t-%d)' % (col, i)) for col in data.columns]
+    cols.append(data)
+    names += [('%s(t)' % (col)) for col in data.columns]
+    cols.append(data.shift(-l))
+    names += [('%s(t+%d)' % (col, l)) for col in data.columns]
+    agg = pd.concat(cols, axis=1)
+    agg.columns = names
+    if dropnan:
+        agg.dropna(inplace=True)
+    return agg
+
+
+## determining window & lag (w,l in the function) ## options to be set! ###
+window = 7
+lag = 1
+
+# to time series:
+
+train_x_time = create_time_series(train_df_x, w = window, l = lag)
+train_y_time = create_time_series(pd.DataFrame(train_df_y), w = window, l = lag)
+
+test_x_time = create_time_series(test_df_x, w = window, l = lag)
+test_y_time = create_time_series(pd.DataFrame(test_df_y), w = window, l = lag)
+
+#train_x_time.shape
+
+# checking the transformation 
+ra = np.arange(0,20)[::-4]
+
+for i in ra:    
+    print(train_x_time.iloc[:,i:(i+3)].head())
+
+## awesome - works nicely :D
+
+# reshaping to fit into sequential NN
+new_l1 = train_x_time.shape[0]
+new_l2 = test_x_time.shape[0]
+
+train_x_time = np.array(train_x_time).reshape(new_l1,(lag+window+1),3)
+train_y_time = np.array(train_y_time).reshape(new_l1,(lag+window+1),1)
+train_y_time_2 = create_time_series(pd.DataFrame(train_df_y), w = window, l = lag)
+
+test_x_time = np.array(test_x_time).reshape(new_l2,(lag+window+1),3)
+test_y_time = np.array(test_y_time).reshape(new_l2,(lag+window+1),1)
+test_y_time_2 = create_time_series(pd.DataFrame(test_df_y), w = window, l = lag)
+
+###################
+### Neural Nets ###
+###################
+epochs = 500 # many needed 
+adam = optimizers.Adam(0.03)  # this lr found to work best here
+
+###  LSTM ###
+
+model_lstm = Sequential()
+model_lstm.add(LSTM(50, activation='tanh', input_shape=([(lag+window+1),3])))
+model_lstm.add(Dense((lag+window+1))) 
+
+model_lstm.compile(loss='mse', optimizer=adam)  # simple MSE as error :D
+model_lstm.summary()
+
+early_stopping_monitor = EarlyStopping(patience = 40)
+fitting_lstm = model_lstm.fit(train_x_time, train_y_time_2, epochs=5000, verbose=2, callbacks = [early_stopping_monitor])
+
+# saving model weights 
+model_lstm.save(
+#       "C:/Users/Nico/Documents/Data/Machine Learning/time series/
+ "model_lstm",
+    overwrite=True)
+
+model_lstm = load_model('model_lstm')
+
+pred_lstm = pd.DataFrame(model_lstm.predict(test_x_time))
+
+## evaluating MSE 
+## therefore only considering the predictions for the t+1 time stance 
+
+pred_lstm_eval = np.array(pred_lstm.iloc[:,8])
+test_df_y_eval = np.array(test_df_y)[0:16]
+    
+df_pred = pd.DataFrame({'Values': test_df_y_eval, 'Predictions' : pred_lstm_eval})
+df_pred.index = pred_lstm.index
+
+plt.figure()
+plt.plot(df_pred.index, df_pred['Values'], '-', df_pred['Predictions'], '--' )
+plt.title("Predictions based on LSTM")
+plt.ylabel("Sales per year")
+plt.xlabel("Years")
+plt.legend(['Original series', 'Predictions'])
+plt.show()
+
+
+def mse_and_mae(a,b):
+    diffs = np.array(a - b)
+    sq_diffs = [i**2 for i in diffs]
+    mse = 1/test_df_y_eval.shape[0] * np.sum(sq_diffs)
+    ##
+    abs_diffs = np.abs(np.array(a - b))
+    mae = 1/test_df_y_eval.shape[0] * np.sum(abs_diffs)
+    ##
+    return(mse)
+    return(mae)
+
+
+mse_and_mae(pred_lstm_eval,test_df_y_eval)
+
+
+### GRU ### 
+# should work better
+
+# epochs & adam with lr re-used
+
+model_gru = Sequential()
+#model_gru.add(GRU(50, return_sequences=True, return_state=True))
+model_gru.add(GRU(50, activation='tanh', input_shape=([(lag+window+1),3])))
+model_gru.add(Dense((lag+window+1)))
+
+model_gru.compile(loss='mse', optimizer=adam)  # simple MSE as error :D
+model_gru.summary()
+
+early_stopping_monitor = EarlyStopping(patience = 40)
+fitting_gru = model_gru.fit(train_x_time, train_y_time_2, epochs=10000, verbose=2, callbacks = [early_stopping_monitor])
+
+
+# saving model weights 
+model_gru.save(
+#       "C:/Users/Nico/Documents/Data/Machine Learning/time series/
+ "model_gru",
+    overwrite=True)
+
+model_gru = load_model('model_gru')
+
+# running GRU and evaluating 
+
+pred_gru = pd.DataFrame(model_gru.predict(test_x_time))
+
+## evaluating MSE 
+## therefore only considering the predictions for the t+1 time stance 
+# again relying on test_df_y_eval
+
+pred_gru_eval = np.array(pred_gru.iloc[:,8])
+test_df_y_eval = np.array(test_df_y)[0:16]
+    
+df_pred = pd.DataFrame({'Values': test_df_y_eval, 'Predictions' : pred_gru_eval})
+df_pred.index = pred_gru.index
+
+plt.figure()
+plt.plot(df_pred.index, df_pred['Values'], '-', df_pred['Predictions'], '--' )
+plt.title("Predictions based on GRU")
+plt.ylabel("Sales per year")
+plt.xlabel("Years")
+plt.legend(['Original series', 'Predictions'])
+plt.show()
+
+
+# again:
+def mse_and_mae(a,b):
+    diffs = np.array(a - b)
+    sq_diffs = [i**2 for i in diffs]
+    mse = 1/test_df_y_eval.shape[0] * np.sum(sq_diffs)
+    ##
+    abs_diffs = np.abs(np.array(a - b))
+    mae = 1/test_df_y_eval.shape[0] * np.sum(abs_diffs)
+    ##
+    return(mse)
+    return(mae)
+
+
+mse_and_mae(pred_gru_eval,test_df_y_eval)
