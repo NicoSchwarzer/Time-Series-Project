@@ -1,0 +1,63 @@
+###################################
+## Advanced econometric analysis ##
+###################################
+
+## Checking stationarity with dickey fuller ##
+## using first differences (only for the sales) to begin with ##
+
+#df1 = pd.read_csv(r'C:/Users/Nico/Documents/Data/Machine Learning/time series/df1.csv')
+
+# first differencing the 
+df1['Sales_quantity'] = df1['Sales_quantity'].diff()
+df1 = df1.iloc[1:,:]
+df1.head(); df1.tail()
+
+result = adfuller(df1['Sales_quantity'].head(), autolag='AIC')
+
+print(f'ADF Statistic: {result[0]}')
+print(f'n_lags: {result[1]}')
+print(f'p-value: {result[1]}')
+for key, value in result[4].items():
+    print('Critial Values:')
+    print(f'   {key}, {value}')
+
+## cannot reject non-stationarity assumption
+## makes sense since it's a seasonal series, see: 
+
+sm1 = sm.tsa.seasonal_decompose(df1['Sales_quantity'] , model='add' , freq=12)
+fig= sm1.plot()
+fig.set_figheight(4)
+plt.show()
+plt.savefig("C:/Users/Nico/Documents/Data/Machine Learning/time series/sales_decomposed.png")
+
+
+# trend observeable and strong seasonal factor 
+# using trend lag of one and seasonal lag of one 
+
+
+my_order = (1, 1, 1)
+my_seasonal_order = (1, 1, 1, 12)
+# define model
+import statsmodels
+
+model_sarimax = statsmodels.tsa.statespace.sarimax.SARIMAX(df1['Sales_quantity'], order=my_order, seasonal_order=my_seasonal_order)
+
+model_sa_fit = model_sarimax.fit()
+fitted_sarimax = model_sa_fit.fittedvalues
+
+print(f'AIC :' + str(model_sa_fit.aic))
+print(f'BIC :' + str(model_sa_fit.aic))
+
+# fitting and plotting 
+
+plt.figure()
+plt.plot(df1.index, df1['Sales_quantity'], '-', fitted_sarimax, '--' )
+plt.title("Sales")
+plt.ylabel("Sales per year")
+plt.xlabel("Years")
+plt.show()
+plt.savefig("C:/Users/Nico/Documents/Data/Machine Learning/time series/sales_sarimax_fitted.png")
+
+
+## extremely good fit! :D
+# lets see if neural networks can be better
