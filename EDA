@@ -1,0 +1,170 @@
+
+### Basics ###
+
+import warnings
+import numpy as np
+import pandas as pd
+from keras.models import Sequential, Model
+import matplotlib.pyplot as plt
+from keras import optimizers
+from keras.utils import plot_model
+from keras.layers import Dense, LSTM, RepeatVector, TimeDistributed, Flatten, GRU
+from keras.callbacks import EarlyStopping
+
+from sklearn.metrics import mean_squared_error
+from sklearn.model_selection import train_test_split
+from tensorflow import set_random_seed
+from numpy.random import seed
+import os
+import scipy.sparse as sp
+from sklearn.impute import SimpleImputer
+from keras.models import load_model
+
+import statsmodels.api as sm
+#import statsmodels.tsa.SARIMA
+#import sm.api.tsa.SVAR
+
+
+from statsmodels.tsa.api import VAR
+from statsmodels.tsa.stattools import adfuller
+#statsmodels.tsa.statespace.sarimax.SARIMAX
+
+from statsmodels.tools.eval_measures import rmse, aic
+import seaborn as sns
+
+set_random_seed(10)
+seed(10)
+
+#setting WD
+os.chdir("C:/Users/Nico/Documents/Data/Machine Learning/time series")
+
+###############################
+## Explanatory Data Analysis ##
+###############################
+
+# reading in data
+
+df1 = pd.read_csv("Month_Value_1.csv", parse_dates = ["Period"])
+
+df1.head()
+df1.describe
+
+df1.dtypes
+df1.shape
+
+# setting index as the time series (period)
+df1.index = df1['Period']
+df1 = df1.drop('Period', axis = 1)
+
+## obviously - deleting after 2020 !!
+
+df1 = df1[df1.index < pd.to_datetime('01-01-2020')]
+
+# examining the time range
+mi = min(df1.index)
+ma = max(df1.index)
+
+df1.to_csv(r'C:/Users/Nico/Documents/Data/Machine Learning/time series/df1.csv')
+df1 = pd.read_csv(r'C:/Users/Nico/Documents/Data/Machine Learning/time series/df1.csv')
+
+
+## removing/imputing NAs ## 
+
+df1.isnull().values.any()
+
+my_list = df1.columns.values.tolist()
+
+for i in my_list:
+    print(df1[i].isnull().values.any())
+    
+imp = SimpleImputer(missing_values=np.nan, strategy='mean')
+ 
+for i in my_list:
+    imp.fit(np.array(df1[i]).reshape(-1,1))
+    df1[i] =  imp.transform(np.array(df1[i]).reshape(-1,1))
+
+df1.isnull().values.any()
+# false now 
+
+df1.to_csv(r'C:/Users/Nico/Documents/Data/Machine Learning/time series/df1.csv')
+#df1 = pd.read_csv(r'C:/Users/Nico/Documents/Data/Machine Learning/time series')
+
+## considering correlations ##
+df1 = pd.read_csv(r'C:/Users/Nico/Documents/Data/Machine Learning/time series/df1.csv')
+
+# shifting sales on period ahead
+
+df_shifted_1 = df1.drop('Sales_quantity', axis = 1)
+s = df1['Sales_quantity'].shift(1)
+df_shifted_2 = pd.merge(df_shifted_1, s, left_index=True, right_index=True).iloc[1:,:]
+
+df_shifted_2.corr() # revenue and average cost seem to have greatest impact 
+
+plt.figure(figsize= (7, 7))
+sns.heatmap(df_shifted_2.corr())
+plt.savefig("C:/Users/Nico/Documents/Data/Machine Learning/time series/fig_heat_1.png")
+
+ 
+# considering multicollinearities 
+plt.figure(figsize= (7, 7))
+sns.heatmap(df_shifted_1.corr())
+plt.savefig("C:/Users/Nico/Documents/Data/Machine Learning/time series/fig_heat_2.png")
+
+
+# considering joint distribution plots 
+
+for i in range(3):
+    plt.figure(figsize= (7, 7))
+    sns.jointplot(df_shifted_1.iloc[:,i], s, kind='reg');
+    plt.show()
+    l = "C:/Users/Nico/Documents/Data/Machine Learning/time series/fig_corr_" + df_shifted_1.iloc[:,i].name + ".png"
+    plt.savefig(l)
+
+    
+
+#####################
+## Visual analysis ## 
+#####################
+#df1 = pd.read_csv(r'C:/Users/Nico/Documents/Data/Machine Learning/time series/df1.csv')
+
+plt.style.use('seaborn')
+
+# Plotting over time - only the sales 
+plt.figure()
+plt.plot(df1.index, df1['Sales_quantity'], 'b-')
+plt.title("Sales")
+plt.ylabel("Sales per year")
+plt.xlabel("Years")
+plt.show()
+
+
+# adding means per year
+plt.figure()
+plt.plot(df1.index, df1['Sales_quantity'], '-', df1['Sales_quantity'].resample('Q').mean().dropna(), '--' )
+plt.title("Sales")
+plt.ylabel("Sales per year")
+plt.xlabel("Years")
+plt.legend(['original series', 'quarterly means'])
+plt.show()
+
+#plt.plot(df1['Sales_quantity'].resample('Q').mean().dropna())
+
+
+
+## all time series
+plt.figure()
+plt.plot(df1.index, df1['Sales_quantity'], 'r-', df1['Revenue'], 'b-', df1['Average_cost'], 'g--', df1['The_average_annual_payroll_of_the_region'], 'p--')
+plt.title("Overview of all series")
+plt.xlabel("Years")
+plt.legend()
+plt.show()
+
+## in first diffs 
+d_diff = df1.diff().iloc[1:,:]
+
+plt.figure()
+plt.plot(d_diff.index, d_diff['Sales_quantity'], 'r-', d_diff['Revenue'], 'b-', d_diff['Average_cost'], 'g--', d_diff['The_average_annual_payroll_of_the_region'], 'p--')
+plt.title("Overview of all series in first diffs")
+plt.xlabel("Years")
+plt.legend(d_diff.columns)
+plt.show()
